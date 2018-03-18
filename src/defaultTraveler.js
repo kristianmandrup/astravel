@@ -7,36 +7,64 @@ let ForInStatement,
 const ignore = Function.prototype
 
 class Found {
-  constructor(node, state) {
+  constructor(node, state, opts = {}) {
     this.node = node
     this.state = state
+    this.opts = opts
   }
+}
+
+function isFunction(fun) {
+  return typeof fun === 'function'
+}
+
+const defaults = {
+  log() {}
+}
+
+function populateOpts(opts) {
+  opts.log = opts.log || defaults.log
+  return opts
 }
 
 export default {
   // Basic methods
-  go(node, state) {
+  go(node, state, opts = {}) {
+    populateOpts(opts)
     /*
     Starts travelling through the specified AST `node` with the provided `state`.
     This method is recursively called by each node handler.
     */
-    this[node.type](node, state)
+    const fun = this[node.type]
+
+    if (!isFunction(fun)) {
+      throw new Error(`AST traveller is missing a visitor function for ${node.type}`)
+    }
+
+    opts.log({
+      type: node.type,
+      node,
+      state
+    })
+
+    fun(node, state, opts)
   },
-  find(predicate, node, state) {
+  find(predicate, node, state, opts = {}) {
+    populateOpts(opts)
     /*
-    Returns { node, state } for which `predicate(node, state)` returns truthy,
+    Returns { node, state } for which `predicate(node, state, opts)` returns truthy,
     starting at the specified AST `node` and with the provided `state`.
     Otherwise, returns `undefined`.
     */
     const finder = Object.create(this)
-    finder.go = function(node, state) {
-      if (predicate(node, state)) {
-        throw new Found(node, state)
+    finder.go = function (node, state, opts) {
+      if (predicate(node, state, opts)) {
+        throw new Found(node, state, opts)
       }
-      this[node.type](node, state)
+      this[node.type](node, state, opts)
     }
     try {
-      finder.go(node, state)
+      finder.go(node, state, opts)
     } catch (error) {
       if (error instanceof Found) {
         return error
@@ -45,341 +73,424 @@ export default {
       }
     }
   },
-  makeChild(properties = {}) {
+  // take the default function as optional second argument
+  // otherwise fallback to use method from defaultTraveller
+  makeChild(properties = {}, {
+    defaultHandler,
+    allKeys
+  }) {
     /*
     Returns a custom AST traveler that inherits from `this` traveler with its own provided `properties` and the property `super` that points to the parent traveler object.
     */
     const traveler = Object.create(this)
-    traveler.super = this
-    for (let key in properties) {
-      traveler[key] = properties[key]
+
+    // is allKeys option is set, iterate all traveler keys, not just those supplied
+    const propsObj = allKeys ? traveler.super : properties
+
+    for (let key in propsObj) {
+      const fun = properties[key]
+      const defHandler = defaultHandler || traveler.super[key]
+      // keep the default traveler function if
+      traveler[key] = isFunction(fun) ? fun : defHandler
     }
     return traveler
   },
 
   // JavaScript 5
-  Program(node, state) {
+  Program(node, state, opts = {}) {
     const statements = node.body,
-      { length } = statements
+      {
+        length
+      } = statements
     for (let i = 0; i < length; i++) {
-      this.go(statements[i], state)
+      this.go(statements[i], state, opts)
     }
   },
-  BlockStatement(node, state) {
+  BlockStatement(node, state, opts = {}) {
     const statements = node.body
     if (statements != null) {
-      for (let i = 0, { length } = statements; i < length; i++) {
-        this.go(statements[i], state)
+      for (let i = 0, {
+          length
+        } = statements; i < length; i++) {
+        this.go(statements[i], state, opts)
       }
     }
   },
   EmptyStatement: ignore,
-  ExpressionStatement(node, state) {
-    this.go(node.expression, state)
+  ExpressionStatement(node, state, opts = {}) {
+    this.go(node.expression, state, opts)
   },
-  IfStatement(node, state) {
-    this.go(node.test, state)
-    this.go(node.consequent, state)
+  IfStatement(node, state, opts = {}) {
+    this.go(node.test, state, opts)
+    this.go(node.consequent, state, opts)
     if (node.alternate != null) {
-      this.go(node.alternate, state)
+      this.go(node.alternate, state, opts)
     }
   },
-  LabeledStatement(node, state) {
-    this.go(node.label, state)
-    this.go(node.body, state)
+  LabeledStatement(node, state, opts = {}) {
+    opts.log('LabeledStatement', {
+      node,
+      state
+    })
+
+    this.go(node.label, state, opts)
+    this.go(node.body, state, opts)
   },
-  BreakStatement(node, state) {
+  BreakStatement(node, state, opts = {}) {
     if (node.label) {
-      this.go(node.label, state)
+      this.go(node.label, state, opts)
     }
   },
-  ContinueStatement(node, state) {
+  ContinueStatement(node, state, opts = {}) {
     if (node.label) {
-      this.go(node.label, state)
+      this.go(node.label, state, opts)
     }
   },
-  WithStatement(node, state) {
-    this.go(node.object, state)
-    this.go(node.body, state)
+  WithStatement(node, state, opts = {}) {
+    this.go(node.object, state, opts)
+    this.go(node.body, state, opts)
   },
-  SwitchStatement(node, state) {
-    this.go(node.discriminant, state)
-    const { cases } = node,
-      { length } = cases
+  SwitchStatement(node, state, opts = {}) {
+    this.go(node.discriminant, state, opts)
+    const {
+      cases
+    } = node, {
+      length
+    } = cases
     for (let i = 0; i < length; i++) {
-      this.go(cases[i], state)
+      this.go(cases[i], state, opts)
     }
   },
-  SwitchCase(node, state) {
+  SwitchCase(node, state, opts = {}) {
     if (node.test != null) {
-      this.go(node.test, state)
+      this.go(node.test, state, opts)
     }
     const statements = node.consequent,
-      { length } = statements
+      {
+        length
+      } = statements
     for (let i = 0; i < length; i++) {
-      this.go(statements[i], state)
+      this.go(statements[i], state, opts)
     }
   },
-  ReturnStatement(node, state) {
+  ReturnStatement(node, state, opts = {}) {
     if (node.argument) {
-      this.go(node.argument, state)
+      this.go(node.argument, state, opts)
     }
   },
-  ThrowStatement(node, state) {
-    this.go(node.argument, state)
+  ThrowStatement(node, state, opts = {}) {
+    this.go(node.argument, state, opts)
   },
-  TryStatement(node, state) {
-    this.go(node.block, state)
+  TryStatement(node, state, opts = {}) {
+    this.go(node.block, state, opts)
     if (node.handler != null) {
-      this.go(node.handler, state)
+      this.go(node.handler, state, opts)
     }
     if (node.finalizer != null) {
-      this.go(node.finalizer, state)
+      this.go(node.finalizer, state, opts)
     }
   },
-  CatchClause(node, state) {
-    this.go(node.param, state)
-    this.go(node.body, state)
+  CatchClause(node, state, opts = {}) {
+    this.go(node.param, state, opts)
+    this.go(node.body, state, opts)
   },
-  WhileStatement(node, state) {
-    this.go(node.test, state)
-    this.go(node.body, state)
+  WhileStatement(node, state, opts = {}) {
+    this.go(node.test, state, opts)
+    this.go(node.body, state, opts)
   },
-  DoWhileStatement(node, state) {
-    this.go(node.body, state)
-    this.go(node.test, state)
+  DoWhileStatement(node, state, opts = {}) {
+    this.go(node.body, state, opts)
+    this.go(node.test, state, opts)
   },
-  ForStatement(node, state) {
+  ForStatement(node, state, opts = {}) {
     if (node.init != null) {
-      this.go(node.init, state)
+      this.go(node.init, state, opts)
     }
     if (node.test != null) {
-      this.go(node.test, state)
+      this.go(node.test, state, opts)
     }
     if (node.update != null) {
-      this.go(node.update, state)
+      this.go(node.update, state, opts)
     }
-    this.go(node.body, state)
+    this.go(node.body, state, opts)
   },
-  ForInStatement: (ForInStatement = function(node, state) {
-    this.go(node.left, state)
-    this.go(node.right, state)
-    this.go(node.body, state)
+  ForInStatement: (ForInStatement = function (node, state, opts = {}) {
+    this.go(node.left, state, opts)
+    this.go(node.right, state, opts)
+    this.go(node.body, state, opts)
   }),
   DebuggerStatement: ignore,
-  FunctionDeclaration: (FunctionDeclaration = function(node, state) {
+  FunctionDeclaration: (FunctionDeclaration = function (node, state, opts) {
     if (node.id != null) {
-      this.go(node.id, state)
+      this.go(node.id, state, opts)
     }
-    const { params } = node
+    const {
+      params
+    } = node
     if (params != null) {
-      for (let i = 0, { length } = params; i < length; i++) {
-        this.go(params[i], state)
+      for (let i = 0, {
+          length
+        } = params; i < length; i++) {
+        this.go(params[i], state, opts)
       }
     }
-    this.go(node.body, state)
+    this.go(node.body, state, opts)
   }),
-  VariableDeclaration(node, state) {
-    const { declarations } = node,
-      { length } = declarations
+  VariableDeclaration(node, state, opts = {}) {
+    const {
+      declarations
+    } = node, {
+      length
+    } = declarations
     for (let i = 0; i < length; i++) {
-      this.go(declarations[i], state)
+      this.go(declarations[i], state, opts)
     }
   },
-  VariableDeclarator(node, state) {
-    this.go(node.id, state)
+  VariableDeclarator(node, state, opts = {}) {
+    this.go(node.id, state, opts)
     if (node.init != null) {
-      this.go(node.init, state)
+      this.go(node.init, state, opts)
     }
   },
-  ArrowFunctionExpression(node, state) {
-    const { params } = node
+  ArrowFunctionExpression(node, state, opts = {}) {
+    const {
+      params
+    } = node
     if (params != null) {
-      for (let i = 0, { length } = params; i < length; i++) {
-        this.go(params[i], state)
+      for (let i = 0, {
+          length
+        } = params; i < length; i++) {
+        this.go(params[i], state, opts)
       }
     }
-    this.go(node.body, state)
+    this.go(node.body, state, opts)
   },
   ThisExpression: ignore,
-  ArrayExpression: (ArrayExpression = function(node, state) {
-    const { elements } = node,
-      { length } = elements
+  ArrayExpression: (ArrayExpression = function (node, state, opts = {}) {
+    const {
+      elements
+    } = node, {
+      length
+    } = elements
     for (let i = 0; i < length; i++) {
       let element = elements[i]
       if (element != null) {
-        this.go(elements[i], state)
+        this.go(elements[i], state, opts)
       }
     }
   }),
-  ObjectExpression(node, state) {
-    const { properties } = node,
-      { length } = properties
+  ObjectExpression(node, state, opts = {}) {
+    const {
+      properties
+    } = node, {
+      length
+    } = properties
     for (let i = 0; i < length; i++) {
-      this.go(properties[i], state)
+      this.go(properties[i], state, opts)
     }
   },
-  Property(node, state) {
-    this.go(node.key, state)
+  Property(node, state, opts) {
+    this.go(node.key, state, opts)
     if (!node.shorthand) {
-      this.go(node.value, state)
+      this.go(node.value, state, opts)
     }
   },
   FunctionExpression: FunctionDeclaration,
-  SequenceExpression(node, state) {
-    const { expressions } = node,
-      { length } = expressions
+  SequenceExpression(node, state, opts = {}) {
+    const {
+      expressions
+    } = node, {
+      length
+    } = expressions
     for (let i = 0; i < length; i++) {
-      this.go(expressions[i], state)
+      this.go(expressions[i], state, opts)
     }
   },
-  UnaryExpression(node, state) {
-    this.go(node.argument, state)
+  UnaryExpression(node, state, opts = {}) {
+    this.go(node.argument, state, opts)
   },
-  UpdateExpression(node, state) {
-    this.go(node.argument, state)
+  UpdateExpression(node, state, opts = {}) {
+    this.go(node.argument, state, opts)
   },
-  AssignmentExpression(node, state) {
-    this.go(node.left, state)
-    this.go(node.right, state)
+  AssignmentExpression(node, state, opts) {
+    this.go(node.left, state, opts)
+    this.go(node.right, state, opts)
   },
-  BinaryExpression: (BinaryExpression = function(node, state) {
-    this.go(node.left, state)
-    this.go(node.right, state)
+  BinaryExpression: (BinaryExpression = function (node, state, opts = {}) {
+    this.go(node.left, state, opts)
+    this.go(node.right, state, opts)
   }),
   LogicalExpression: BinaryExpression,
-  ConditionalExpression(node, state) {
-    this.go(node.test, state)
-    this.go(node.consequent, state)
-    this.go(node.alternate, state)
+  ConditionalExpression(node, state, opts = {}) {
+    this.go(node.test, state, opts)
+    this.go(node.consequent, state, opts)
+    this.go(node.alternate, state, opts)
   },
-  NewExpression(node, state) {
-    this.CallExpression(node, state)
+  NewExpression(node, state, opts = {}) {
+    this.CallExpression(node, state, opts)
   },
-  CallExpression(node, state) {
-    this.go(node.callee, state)
+  CallExpression(node, state, opts = {}) {
+    this.go(node.callee, state, opts)
     const args = node['arguments'],
-      { length } = args
+      {
+        length
+      } = args
     for (let i = 0; i < length; i++) {
-      this.go(args[i], state)
+      this.go(args[i], state, opts)
     }
   },
-  MemberExpression(node, state) {
-    this.go(node.object, state)
-    this.go(node.property, state)
+  MemberExpression(node, state, opts = {}) {
+    this.go(node.object, state, opts)
+    this.go(node.property, state, opts)
   },
   Identifier: ignore,
   Literal: ignore,
 
   // JavaScript 6
   ForOfStatement: ForInStatement,
-  ClassDeclaration(node, state) {
+  ClassDeclaration(node, state, opts = {}) {
     if (node.id) {
-      this.go(node.id, state)
+      this.go(node.id, state, opts)
     }
     if (node.superClass) {
-      this.go(node.superClass, state)
+      this.go(node.superClass, state, opts)
     }
-    this.go(node.body, state)
+    this.go(node.body, state, opts)
   },
-  ClassBody(node, state) {
-    const { body } = node,
-      { length } = body
+  ClassBody(node, state, opts = {}) {
+    const {
+      body
+    } = node, {
+      length
+    } = body
     for (let i = 0; i < length; i++) {
-      this.go(body[i], state)
+      this.go(body[i], state, opts)
     }
   },
-  ImportDeclaration(node, state) {
-    const { specifiers } = node,
-      { length } = specifiers
+  ImportDeclaration(node, state, opts = {}) {
+    const {
+      specifiers
+    } = node, {
+      length
+    } = specifiers
     for (let i = 0; i < length; i++) {
-      this.go(specifiers[i], state)
+      this.go(specifiers[i], state, opts)
     }
-    this.go(node.source, state)
+    this.go(node.source, state, opts)
   },
-  ImportNamespaceSpecifier(node, state) {
-    this.go(node.local, state)
+  ImportNamespaceSpecifier(node, state, opts = {}) {
+    this.go(node.local, state, opts)
   },
-  ImportDefaultSpecifier(node, state) {
-    this.go(node.local, state)
+  ImportDefaultSpecifier(node, state, opts = {}) {
+    this.go(node.local, state, opts)
   },
-  ImportSpecifier(node, state) {
-    this.go(node.imported, state)
-    this.go(node.local, state)
+  ImportSpecifier(node, state, opts) {
+    this.go(node.imported, state, opts)
+    this.go(node.local, state, opts)
   },
-  ExportDefaultDeclaration(node, state) {
-    this.go(node.declaration, state)
+  ExportDefaultDeclaration(node, state, opts = {}) {
+    this.go(node.declaration, state, opts)
   },
-  ExportNamedDeclaration(node, state) {
+  ExportNamedDeclaration(node, state, opts = {}) {
     if (node.declaration) {
-      this.go(node.declaration, state)
+      this.go(node.declaration, state, opts)
     }
-    const { specifiers } = node,
-      { length } = specifiers
+    const {
+      specifiers
+    } = node, {
+      length
+    } = specifiers
     for (let i = 0; i < length; i++) {
-      this.go(specifiers[i], state)
+      this.go(specifiers[i], state, opts)
     }
     if (node.source) {
-      this.go(node.source, state)
+      this.go(node.source, state, opts)
     }
   },
-  ExportSpecifier(node, state) {
-    this.go(node.local, state)
-    this.go(node.exported, state)
+  ExportSpecifier(node, state, opts = {}) {
+    this.go(node.local, state, opts)
+    this.go(node.exported, state, opts)
   },
-  ExportAllDeclaration(node, state) {
-    this.go(node.source, state)
+  ExportAllDeclaration(node, state, opts = {}) {
+    this.go(node.source, state, opts)
   },
-  MethodDefinition(node, state) {
-    this.go(node.key, state)
-    this.go(node.value, state)
+  MethodDefinition(node, state, opts) {
+    this.go(node.key, state, opts)
+    this.go(node.value, state, opts)
   },
-  ClassExpression(node, state) {
-    this.ClassDeclaration(node, state)
+  ClassExpression(node, state, opts = {}) {
+    this.ClassDeclaration(node, state, opts)
   },
   Super: ignore,
-  RestElement: (RestElement = function(node, state) {
-    this.go(node.argument, state)
+  RestElement: (RestElement = function (node, state, opts = {}) {
+    this.go(node.argument, state, opts)
   }),
   SpreadElement: RestElement,
-  YieldExpression(node, state) {
+  YieldExpression(node, state, opts = {}) {
     if (node.argument) {
-      this.go(node.argument, state)
+      this.go(node.argument, state, opts)
     }
   },
-  TaggedTemplateExpression(node, state) {
-    this.go(node.tag, state)
-    this.go(node.quasi, state)
+  TaggedTemplateExpression(node, state, opts = {}) {
+    this.go(node.tag, state, opts)
+    this.go(node.quasi, state, opts)
   },
-  TemplateLiteral(node, state) {
-    const { quasis, expressions } = node
-    for (let i = 0, { length } = expressions; i < length; i++) {
-      this.go(expressions[i], state)
+  TemplateLiteral(node, state, opts = {}) {
+    const {
+      quasis,
+      expressions
+    } = node
+    for (let i = 0, {
+        length
+      } = expressions; i < length; i++) {
+      this.go(expressions[i], state, opts)
     }
-    for (let i = 0, { length } = quasis; i < length; i++) {
-      this.go(quasis[i], state)
+    for (let i = 0, {
+        length
+      } = quasis; i < length; i++) {
+      this.go(quasis[i], state, opts)
     }
   },
   TemplateElement: ignore,
-  ObjectPattern(node, state) {
-    const { properties } = node,
-      { length } = properties
+  ObjectPattern(node, state, opts = {}) {
+    const {
+      properties
+    } = node, {
+      length
+    } = properties
     for (let i = 0; i < length; i++) {
-      this.go(properties[i], state)
+      this.go(properties[i], state, opts)
     }
   },
   ArrayPattern: ArrayExpression,
-  AssignmentPattern(node, state) {
-    this.go(node.left, state)
-    this.go(node.right, state)
+  AssignmentPattern(node, state, opts = {}) {
+    this.go(node.left, state, opts)
+    this.go(node.right, state, opts)
   },
-  MetaProperty(node, state) {
-    this.go(node.meta, state)
-    this.go(node.property, state)
+  MetaProperty(node, state, opts = {}) {
+    this.go(node.meta, state, opts)
+    this.go(node.property, state, opts)
   },
 
   // JavaScript 7
-  AwaitExpression(node, state) {
-    this.go(node.argument, state)
+  AwaitExpression(node, state, opts = {}) {
+    this.go(node.argument, state, opts)
+  },
+
+  // TypeScript
+  Decorator(node, state, opts = {}) {
+    this.go(node.argument, state, opts)
+  },
+
+  ClassImplements(node, state, opts = {}) {
+    this.go(node.argument, state, opts)
+  },
+
+  TSTypeAnnotation(node, state, opts = {}) {
+    this.go(node.argument, state, opts)
+  },
+
+  TSStringKeyword(node, state, opts = {}) {
+    this.go(node.argument, state, opts)
   },
 }

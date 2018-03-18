@@ -13,8 +13,7 @@
 - Works on [ESTree](https://github.com/estree/estree)-compliant ASTs such as the ones produced by [Acorn](https://github.com/marijnh/acorn).
 - Out-of-the-box functions such as source code comments insertion for [Astring](https://github.com/davidbonnet/astring).
 - No dependencies and small footprint.
-
-
+- Now also includes a TypeScript example ;)
 
 ## Installation
 
@@ -49,21 +48,21 @@ The `astravel` module exports the following items:
 
 This object describes a basic AST traveler. It contains the following methods:
 
-- `go(node, state)`: Travels through the provided AST `node` with a given `state` (an object that can be of any type) by recursively calling this method.
-- `find(predicate, node, state) ➞ { node, state }?`: Returns `{ node, state }` for which `predicate(node, state)` returns truthy, starting at the specified AST `node` and with the provided `state`. Otherwise, returns `undefined`.
-- `[NodeType](node, state)`: Method handler for a specific `NodeType`.
+- `go(node, state, opts)`: Travels through the provided AST `node` with a given `state` (an object that can be of any type) by recursively calling this method.
+- `find(predicate, node, state, opts) ➞ { node, state }?`: Returns `{ node, state, opts }` for which `predicate(node, state, opts)` returns truthy, starting at the specified AST `node` and with the provided `state`. Otherwise, returns `undefined`.
+- `[NodeType](node, state, opts)`: Method handler for a specific `NodeType`.
 - `makeChild(properties) ➞ traveler`: Returns a custom AST traveler that inherits from `this` traveler with its own provided `properties` and the property `super` that points to `this` traveler.
 
 
 #### astravel.makeTraveler(properties) ➞ traveler
 
-This function is similar to `astravel.defaultTraveler.makeChild`: it returns a traveler that inherits from the `defaultTraveler` with its own provided `properties` and the property `super` that points to the `defaultTraveler` object. These properties should redefine the traveler's behavior by implementing the `go(node, state)` method and/or any node handler.
+This function is similar to `astravel.defaultTraveler.makeChild`: it returns a traveler that inherits from the `defaultTraveler` with its own provided `properties` and the property `super` that points to the `defaultTraveler` object. These properties should redefine the traveler's behavior by implementing the `go(node, state, opts)` method and/or any node handler.
 
 When redefining the `go` method, make sure its basic functionality is kept by calling the parent's `go` method to keep traveling through the AST:
 
 ```javascript
 var customTraveler = astravel.makeTraveler({
-  go: function(node, state) {
+  go: function(node, state, opts) {
     // Code before entering the node
     console.log('Entering ' + node.type)
     // Call the parent's `go` method
@@ -84,7 +83,6 @@ var customTraveler = astravel.makeTraveler({
   ArrowFunctionExpression: ignore,
 })
 ```
-
 
 #### astravel.attachComments(ast, comments) ➞ ast
 
@@ -146,7 +144,6 @@ function add(a, b) {
 
 All building scripts are defined in the `package.json` file and rely on the [Node Package Manager](https://www.npmjs.com/). All commands must be run from within the root repository folder.
 
-
 ### Production
 
 Production code can be obtained from the `dist` folder by running:
@@ -162,7 +159,6 @@ A minified version of Astravel with source maps can be obtained at `dist/astrave
 ```bash
 npm run build:minified
 ```
-
 
 ### Development
 
@@ -181,7 +177,9 @@ While making changes to Astravel, make sure it passes the tests (it checks code 
 npm test
 ```
 
+## Examples
 
+The examples demonstrate using the parser with both [typescript-eslint-parser](https://github.com/eslint/typescript-eslint-parser) and [acorn](https://www.npmjs.com/package/acorn)
 
 ## Roadmap
 
